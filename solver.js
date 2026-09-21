@@ -1,5 +1,5 @@
 import { parseClass, isTeachingLesson, isAssemblySlot } from "./parser.js";
-import { runRules } from "./rules.js";
+import { runRules, DAILY_LIMITS, SESSION_LIMITS } from "./rules.js";
 
 const weight = (errors) =>
   errors.reduce((sum, error) => sum + error.actual - error.limit, 0);
@@ -83,6 +83,11 @@ export function suggestMoves(data, issue, maximum = 3) {
       if (!teacher) continue;
       for (const target of teacher.lessons.filter((l) => l.kind === "empty")) {
         if (isAssemblySlot(day.name, target)) continue;
+        if (day.name !== current.day && teacher.lessons.filter(isTeachingLesson).length >= DAILY_LIMITS[day.name]) continue;
+        const sameSession = day.name === current.day && target.session === source.session;
+        const inSession = day.rows.flatMap(row => row.lessons).filter(l => l.session === target.session);
+        if (inSession.some(l => l.period === target.period && (l.className === source.className || l.kind === 'unrecognized'))) continue;
+        if (!sameSession && inSession.filter(l => l.className === source.className).length >= SESSION_LIMITS[target.session]) continue;
         candidates.push({
           teacherKey: source.teacherKey,
           teacherName: source.teacherName,
@@ -112,18 +117,22 @@ export function suggestMoves(data, issue, maximum = 3) {
   }
   candidates.sort((a, b) => a.priority - b.priority);
   const results = [];
+  const beforeWeight = weight(runRules(data));
   for (const candidate of candidates) {
     try {
       const next = applyMove(data, candidate);
       const remaining = runRules(next).find((e) => e.id === current.id);
       if (remaining && remaining.actual >= current.actual) continue;
+      candidate.improvement = beforeWeight - weight(runRules(next));
+      candidate.dayDistance = Math.abs(data.days.findIndex(d => d.name === candidate.to.day) - data.days.findIndex(d => d.name === candidate.from.day));
+      candidate.periodDistance = Math.abs((candidate.to.period + (candidate.to.session === 'Chiều' ? 4 : 0)) - (candidate.from.period + (candidate.from.session === 'Chiều' ? 4 : 0)));
       results.push(candidate);
-      if (results.length >= maximum) break;
     } catch {
       /* Occupied class slots and rule limits eliminate this candidate. */
     }
   }
-  return results;
+  results.sort((a, b) => b.improvement - a.improvement || a.priority - b.priority || a.dayDistance - b.dayDistance || a.periodDistance - b.periodDistance);
+  return results.slice(0, maximum);
 }
 
 export function buildPlan(data, maxMoves = 100) {

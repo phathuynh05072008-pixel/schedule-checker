@@ -35,6 +35,44 @@ function fixture() {
   return workbook;
 }
 
+test('summary is optional and recognized by headers, independent of its name', () => {
+  const workbook = fixture();
+  workbook.Sheets['Tổng tiết'] = workbook.Sheets.Sheet1;
+  delete workbook.Sheets.Sheet1;
+  workbook.SheetNames[5] = 'Tổng tiết';
+  assert.equal(parseWorkbook(workbook).summary[0].sheetName, 'Tổng tiết');
+  delete workbook.Sheets['Tổng tiết']; workbook.SheetNames.pop();
+  const data = parseWorkbook(workbook);
+  assert.equal(data.days.length, 5); assert.deepEqual(data.summary, []);
+  assert.ok(data.notes.some(n => n.includes('Không có bảng tổng hợp')));
+  workbook.Sheets['Sheet1'] = { '!ref': 'A1:B2', A1: { v: 'Other data' } };
+  workbook.SheetNames.push('Sheet1');
+  assert.equal(parseWorkbook(workbook).days.length, 5);
+});
+
+test('recognizes aliases and shifted totals without inventing absent total columns', () => {
+  const workbook = fixture();
+  workbook.Sheets[' t2 '] = workbook.Sheets['THỨ HAI'];
+  delete workbook.Sheets['THỨ HAI']; workbook.SheetNames[0] = ' t2 ';
+  const monday = workbook.Sheets[' t2 '];
+  for (const row of [9, 10]) { monday[`J${row}`] = monday[`K${row}`]; delete monday[`K${row}`]; }
+  const data = parseWorkbook(workbook);
+  assert.equal(data.days[0].sourceName, ' t2 ');
+  assert.equal(data.days[0].totalColumn, 9);
+  for (const row of [9, 10]) delete monday[`J${row}`];
+  assert.equal(parseWorkbook(workbook).days[0].rows[0].sourceTotal, null);
+  workbook.Sheets['THỨ HAI'] = monday; workbook.SheetNames.push('THỨ HAI');
+  assert.throws(() => parseWorkbook(workbook), /nhiều sheet/);
+});
+
+test('finds a day from its worksheet title when the tab has an arbitrary name', () => {
+  const workbook = fixture();
+  workbook.Sheets['Lịch đầu tuần'] = workbook.Sheets['THỨ HAI'];
+  workbook.Sheets['Lịch đầu tuần'].A5 = { v: 'Thứ Hai' };
+  delete workbook.Sheets['THỨ HAI']; workbook.SheetNames[0] = 'Lịch đầu tuần';
+  assert.equal(parseWorkbook(workbook).days[0].sourceName, 'Lịch đầu tuần');
+});
+
 test('normalizes NFC, activities, missing spaces and preserves raw input', () => {
   for (const text of ['HĐTN 2B', '2b', ' 2 B ', 'TNXH 2B', 'TCTV 2B', 'TCT 2B', 'CN 2B', 'ĐĐ2B'.normalize('NFD')]) {
     assert.equal(parseClass(text).className, '2B'); assert.equal(parseClass(text).raw, text);

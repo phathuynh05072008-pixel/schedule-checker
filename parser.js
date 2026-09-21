@@ -13,7 +13,7 @@ export function parseClass(value) {
   const raw = String(value ?? '');
   const text = key(raw);
   if (!text) return { raw, text: '', className: null, activity: null, kind: 'empty' };
-  const match = text.match(/^(?:(HĐTN|TNXH|TCTV|TCT|CN|ĐĐ)\s*)?([1-5])\s*([A-Z])$/u);
+  const match = text.match(/^(?:(HĐTN|TNXH|TCTV|TCT|LTTV|LTT|CN|ĐĐ)\s*)?([1-5])\s*([A-Z])$/u);
   return match
     ? { raw, text, className: match[2] + match[3], activity: match[1] ?? null, kind: 'lesson' }
     : { raw, text, className: null, activity: null, kind: 'unrecognized' };
@@ -61,26 +61,30 @@ function checkTotal(sheet, cell, actual, warnings, sheetName, assemblyCount = 0)
 
 function parseDay(sheet, name, warnings) {
   const morningOnly = name === 'THỨ TƯ';
-  if (key(mergedValue(sheet, 0, 7)) !== 'MÔN' || key(mergedValue(sheet, 1, 7)) !== 'TÊN GV') {
-    throw new ParseError(`${name}: cần tiêu đề Môn và Tên GV tại A7, B7.`);
-  }
+  const headerRow = Array.from({ length: Math.min(lastRow(sheet), 30) }, (_, i) => i + 1)
+    .find(row => key(mergedValue(sheet, 0, row)) === 'MÔN' && key(mergedValue(sheet, 1, row)) === 'TÊN GV');
+  if (!headerRow) throw new ParseError(`${name}: không tìm thấy tiêu đề Môn và Tên GV ở cột A, B.`);
   const slotCount = morningOnly ? 4 : 7;
   const slots = Array.from({ length: slotCount }, (_, i) => ({
     column: i + 2, session: i < 4 ? 'Sáng' : 'Chiều', period: i < 4 ? i + 1 : i - 3,
   }));
   for (const slot of slots) {
-    if (key(mergedValue(sheet, slot.column, 7)) !== key(slot.session) ||
-        key(valueAt(sheet, slot.column, 8)) !== `TIẾT ${slot.period}`) {
-      throw new ParseError(`${name}!${address(slot.column, 8)}: tiêu đề buổi hoặc tiết không đúng cấu trúc.`);
+    if (key(mergedValue(sheet, slot.column, headerRow)) !== key(slot.session) ||
+        key(valueAt(sheet, slot.column, headerRow + 1)) !== `TIẾT ${slot.period}`) {
+      throw new ParseError(`${name}!${address(slot.column, headerRow + 1)}: tiêu đề buổi hoặc tiết không đúng cấu trúc.`);
     }
   }
-  if (morningOnly && [6, 7, 8].some(c => key(mergedValue(sheet, c, 7)) === 'CHIỀU')) {
+  if (morningOnly && [6, 7, 8].some(c => key(mergedValue(sheet, c, headerRow)) === 'CHIỀU')) {
     throw new ParseError('THỨ TƯ chỉ được có buổi Sáng.');
   }
-  const totalColumn = morningOnly ? 7 : 10;
+  const totalCandidates = Array.from({ length: 5 }, (_, i) => slotCount + 2 + i).filter(column =>
+    /TỔNG/.test(key(mergedValue(sheet, column, headerRow))) ||
+    Array.from({ length: lastRow(sheet) - headerRow - 1 }, (_, i) => i + headerRow + 2)
+      .some(row => teacherAt(sheet, row, 0, 1).teacherName && typeof valueAt(sheet, column, row) === 'number'));
+  const totalColumn = totalCandidates.length === 1 ? totalCandidates[0] : null;
   const rows = [];
   const names = new Map();
-  for (let row = 9; row <= lastRow(sheet); row++) {
+  for (let row = headerRow + 2; row <= lastRow(sheet); row++) {
     const teacher = teacherAt(sheet, row, 0, 1);
     const hasLessons = slots.some(slot => normalizeText(valueAt(sheet, slot.column, row)));
     if (!teacher.teacherName) {
@@ -98,7 +102,7 @@ function parseDay(sheet, name, warnings) {
       if (merged) throw new ParseError(`${name}!${cell}: ô lịch dạy bị gộp, không thể xác định riêng từng tiết.`);
       if (sheet[cell]?.f || sheet[cell]?.t === 'e') throw new ParseError(`${name}!${cell}: ô lịch dạy chứa công thức hoặc lỗi Excel; cần nhập tên lớp dạng văn bản.`);
       const parsed = parseClass(valueAt(sheet, slot.column, row));
-      if (isAssemblySlot(name, slot) && parsed.text === 'CC PHÂN HIỆU') {
+      if (isAssemblySlot(name, slot) && ['CC', 'CC PHÂN HIỆU'].includes(parsed.text)) {
         parsed.kind = 'assembly';
         parsed.activity = 'CC';
       }
@@ -109,62 +113,106 @@ function parseDay(sheet, name, warnings) {
     const actualTotal = lessons.filter(isTeachingLesson).length;
     const assemblyCount = lessons.filter(item => item.kind === 'assembly').length;
     rows.push({ ...teacher, teacherKey, row, lessons, actualTotal, assemblyCount,
-      sourceTotal: checkTotal(sheet, address(totalColumn, row), actualTotal, warnings, name, assemblyCount) });
+      sourceTotal: totalColumn === null ? null : actualTotal === 0 && !normalizeText(valueAt(sheet, totalColumn, row))
+        ? { cell: address(totalColumn, row), value: 0, formula: sheet[address(totalColumn, row)]?.f ?? null, includesAssembly: false }
+        : checkTotal(sheet, address(totalColumn, row), actualTotal, warnings, name, assemblyCount) });
   }
   if (!rows.length) throw new ParseError(`${name}: không tìm thấy giáo viên từ dòng 9.`);
   return { name, slots, totalColumn, rows, actualTotal: rows.reduce((sum, row) => sum + row.actualTotal, 0) };
 }
 
-function parseSummary(sheet, days, warnings) {
-  if (key(mergedValue(sheet, 2, 4)) !== 'TÊN GV' ||
-      DAY_NAMES.some((name, i) => key(mergedValue(sheet, i + 3, 4)) !== name)) {
-    throw new ParseError('Sheet1: cần Tên GV ở C4 và Thứ Hai đến Thứ Sáu ở D4:H4.');
+function summaryLayout(sheet) {
+  for (let row = 1; row <= Math.min(lastRow(sheet), 30); row++) for (let column = 1; column <= 3; column++) {
+    if (key(mergedValue(sheet, column, row)) !== 'TÊN GV') continue;
+    if (DAY_NAMES.every((name, i) => {
+      const text = key(mergedValue(sheet, column + i + 1, row));
+      return text === name || text === name.replace('THỨ ', '');
+    })) return { row, column };
   }
+  return null;
+}
+
+function parseSummary(sheet, days, warnings, sheetName, layout) {
   const rows = [];
   const seen = new Set();
-  for (let row = 6; row <= lastRow(sheet); row++) {
-    const teacher = teacherAt(sheet, row, 1, 2);
+  for (let row = layout.row + 1; row <= lastRow(sheet); row++) {
+    const teacher = teacherAt(sheet, row, layout.column - 1, layout.column);
     if (!teacher.teacherName) continue;
     const teacherKey = key(teacher.teacherName);
-    if (seen.has(teacherKey)) throw new ParseError(`Sheet1: tên giáo viên "${teacher.teacherName}" bị trùng.`);
+    if (seen.has(teacherKey)) throw new ParseError(`${sheetName}: tên giáo viên "${teacher.teacherName}" bị trùng.`);
     seen.add(teacherKey);
     const dailyTotals = days.map((day, i) => {
       const source = day.rows.find(item => item.teacherKey === teacherKey);
       if (!source) {
-        warn(warnings, 'MISSING_TEACHER', 'Sheet1', teacher.teacherCell, `Không tìm thấy ${teacher.teacherName} trong ${day.name}.`);
-        return { cell: address(i + 3, row), value: valueAt(sheet, i + 3, row) ?? null, actual: null };
+        warn(warnings, 'MISSING_TEACHER', sheetName, teacher.teacherCell, `Không tìm thấy ${teacher.teacherName} trong ${day.name}.`);
+        return { cell: address(i + layout.column + 1, row), value: valueAt(sheet, i + layout.column + 1, row) ?? null, actual: null };
       }
-      return { ...checkTotal(sheet, address(i + 3, row), source.actualTotal, warnings, 'Sheet1', source.assemblyCount), actual: source.actualTotal };
+      const cell = address(i + layout.column + 1, row);
+      if (source.actualTotal === 0 && !normalizeText(sheet[cell]?.v)) return { cell, value: 0, actual: 0, includesAssembly: false };
+      return { ...checkTotal(sheet, cell, source.actualTotal, warnings, sheetName, source.assemblyCount), actual: source.actualTotal };
     });
     const actualWeek = dailyTotals.every(t => t.actual !== null) ? dailyTotals.reduce((sum, t) => sum + t.actual, 0) : null;
     const assemblyWeek = days.reduce((sum, day) => sum + (day.rows.find(r => r.teacherKey === teacherKey)?.assemblyCount ?? 0), 0);
-    const weeklyTotal = actualWeek === null ? null : checkTotal(sheet, address(8, row), actualWeek, warnings, 'Sheet1', assemblyWeek);
-    rows.push({ ...teacher, teacherKey, row, dailyTotals, actualWeek, weeklyTotal });
+    const weeklyCell = address(layout.column + 6, row);
+    const weeklyTotal = actualWeek === null || !sheet[weeklyCell] ? null : checkTotal(sheet, weeklyCell, actualWeek, warnings, sheetName, assemblyWeek);
+    rows.push({ ...teacher, sheetName, teacherKey, row, dailyTotals, actualWeek, weeklyTotal });
   }
   for (const day of days) for (const teacher of day.rows) {
     if (!seen.has(teacher.teacherKey)) warn(warnings, 'MISSING_SUMMARY_TEACHER', day.name, teacher.teacherCell,
-      `${teacher.teacherName} chưa có trong Sheet1.`);
+      `${teacher.teacherName} chưa có trong ${sheetName}.`);
   }
   return rows;
 }
 
 export function parseWorkbook(workbook) {
   if (!Array.isArray(workbook?.SheetNames) || !workbook.Sheets) throw new ParseError('Không đọc được cấu trúc workbook Excel.');
-  const required = [...DAY_NAMES, 'Sheet1'];
-  const missing = required.filter(name => !workbook.SheetNames.includes(name) || !workbook.Sheets[name]);
+  const sources = new Map();
+  for (const name of workbook.SheetNames) {
+    const normalized = key(name);
+    const numeric = normalized.match(/^(?:THỨ|THU|T)\s*([2-6])$/);
+    let day = numeric ? DAY_NAMES[Number(numeric[1]) - 2] : DAY_NAMES.find(d => key(d) === normalized);
+    if (!day && !/CŨ|OLD|BACKUP|LƯU/i.test(normalized)) {
+      const sheet = workbook.Sheets[name];
+      const hasSchedule = Array.from({ length: 30 }, (_, i) => i + 1).some(row =>
+        key(valueAt(sheet, 0, row)) === 'MÔN' && key(valueAt(sheet, 1, row)) === 'TÊN GV');
+      if (hasSchedule) {
+        const titles = DAY_NAMES.filter(d => Array.from({ length: 30 }, (_, i) => i + 1).some(row => key(valueAt(sheet, 0, row)) === d));
+        if (titles.length === 1) day = titles[0];
+      }
+    }
+    if (!day) continue;
+    if (sources.has(day)) throw new ParseError(`Có nhiều sheet cùng nhận diện là ${day}; cần phân biệt trước khi nhập.`);
+    sources.set(day, name);
+  }
+  const missing = DAY_NAMES.filter(name => !sources.has(name) || !workbook.Sheets[sources.get(name)]);
   if (missing.length) throw new ParseError(`File thiếu sheet bắt buộc: ${missing.join(', ')}.`);
   const warnings = [];
-  for (const name of workbook.SheetNames.filter(name => !required.includes(name))) {
-    warn(warnings, 'EXTRA_SHEET', name, null, 'Sheet bổ sung được giữ trong workbook gốc, không dùng làm nguồn lịch dạy.');
-  }
-  const days = DAY_NAMES.map(name => parseDay(workbook.Sheets[name], name, warnings));
+  const days = DAY_NAMES.map(name => ({ ...parseDay(workbook.Sheets[sources.get(name)], name, warnings), sourceName: sources.get(name) }));
   const teachers = [...new Set(days.flatMap(day => day.rows.map(row => row.teacherKey)))];
   for (const teacher of teachers) for (const day of days) {
     if (!day.rows.some(row => row.teacherKey === teacher)) warn(warnings, 'MISSING_DAY_TEACHER', day.name, null,
       `Thiếu giáo viên ${teacher} trong sheet ngày; không giả định người này rảnh.`);
   }
-  const summary = parseSummary(workbook.Sheets.Sheet1, days, warnings);
-  return { schemaVersion: 1, days, summary, warnings,
+  const notes = [];
+  const candidates = [];
+  for (const name of workbook.SheetNames.filter(name => ![...sources.values()].includes(name))) {
+    // Explicitly archived worksheets must never be used as the current summary.
+    if (/CŨ|OLD|BACKUP|LƯU/i.test(key(name))) { notes.push(`Giữ nguyên sheet ${name}, không dùng bảng cũ để đối chiếu.`); continue; }
+    try {
+      const layout = summaryLayout(workbook.Sheets[name]);
+      if (layout) candidates.push({ name, layout });
+      else notes.push(`Giữ nguyên sheet ${name}; chưa nhận diện được bảng tổng hợp trong sheet này.`);
+    } catch { notes.push(`Không đọc bảng phụ ${name}; vẫn kiểm tra các sheet lịch.`); }
+  }
+  let summary = [];
+  if (candidates.length === 1) {
+    const { name, layout } = candidates[0];
+    const summaryWarnings = [];
+    try { summary = parseSummary(workbook.Sheets[name], days, summaryWarnings, name, layout); warnings.push(...summaryWarnings); }
+    catch (error) { notes.push(`Bỏ qua bảng tổng hợp ${name}: ${error.message}`); }
+  } else notes.push(candidates.length ? 'Có nhiều bảng tổng hợp; chỉ kiểm tra lịch từng ngày, không cập nhật các bảng phụ.' : 'Không có bảng tổng hợp phù hợp. Số tiết được tự đếm từ lịch từng ngày.');
+  if (days.some(d => d.totalColumn === null)) notes.push('Một số sheet không có cột tổng rõ ràng. Web tự đếm tiết và không thêm cột vào file gốc.');
+  return { schemaVersion: 1, days, summary, warnings, notes,
     stats: { days: days.length, teachers: teachers.length, occupiedSlots: days.reduce((sum, day) => sum + day.actualTotal, 0) } };
 }
 

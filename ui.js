@@ -34,6 +34,47 @@ let busy = false,
   worker = null,
   preview = null;
 const allMoves = () => transactions.flatMap((transaction) => transaction.moves);
+let recommendationWorker = null, recommendations = null, recommendationStatus = '';
+
+function resetRecommendations() {
+  recommendationWorker?.terminate(); recommendationWorker = null;
+  recommendations = null; recommendationStatus = '';
+}
+
+function recommend() {
+  resetRecommendations();
+  if (!issues.length) return;
+  recommendationStatus = 'Đang tìm phương án ưu tiên…';
+  renderResults(); icons();
+  const snapshot = data;
+  let current;
+  const failed = message => {
+    if (recommendationWorker !== current || data !== snapshot) return;
+    recommendationWorker?.terminate(); recommendationWorker = null;
+    recommendationStatus = message; renderResults(); icons();
+  };
+  try {
+    current = new Worker(new URL('./solver-worker.js', import.meta.url), { type: 'module' });
+    recommendationWorker = current;
+    const timer = setTimeout(() => failed('Chưa tìm xong trong 30 giây. Nhấn Chỉnh sửa để thử lại.'), 30000);
+    current.onmessage = ({ data: result }) => {
+      clearTimeout(timer);
+      if (recommendationWorker !== current || data !== snapshot) return;
+      if (result.error) { failed(result.error); return; }
+      recommendations = result.suggestions; recommendationStatus = '';
+      current.terminate(); recommendationWorker = null; renderResults(); icons();
+    };
+    current.onerror = () => { clearTimeout(timer); failed('Không tìm được gợi ý. Nhấn Chỉnh sửa để thử lại.'); };
+    current.postMessage({ schedule: data, recommendationsOnly: true });
+  } catch { recommendationStatus = 'Không mở được bộ tìm phương án.'; renderResults(); icons(); }
+}
+
+function recommendationHtml(issue) {
+  if (!recommendations) return `<p class="recommendation muted" role="status">${escape(recommendationStatus || 'Nhấn Kiểm tra để tìm phương án.')}</p>`;
+  const best = recommendations.find(r => r.id === issue.id)?.moves[0];
+  if (!best) return '<p class="recommendation muted">Không tìm được cách chuyển một tiết hợp lệ cho lỗi này; cần điều chỉnh thủ công.</p>';
+  return `<div class="recommendation"><strong>Phương án ưu tiên · ${escape(best.teacherName)} · ${escape(best.raw)}</strong><p>${escape(describe(best))}</p><p class="muted">Giảm ${best.improvement} mức vượt giới hạn; ưu tiên giảm lỗi nhiều nhất, giữ cùng buổi/ngày, rồi vị trí gần nhất. Chưa áp dụng vào lịch.</p><button class="secondary" data-recommend="${issues.indexOf(issue)}">${icon('check')}Xác nhận áp dụng</button></div>`;
+}
 
 function notify(message = "", error = false) {
   $("notice").hidden = !message;
@@ -131,6 +172,7 @@ function renderResults() {
       <p class="message">${escape(issue.message)}</p>
       <div class="locations">${issue.lessons.map((lesson) => `<span class="location" title="${escape(`${lesson.teacherName} · ${lesson.subject || "Chưa có môn"} · ${lesson.session} tiết ${lesson.period}`)}"><b>${escape(lesson.cell)}</b>${escape(lesson.raw)} · ${escape(lesson.teacherName)}</span>`).join("")}</div>
       <p class="suggestion">${escape(issue.suggestion)}</p>
+      ${recommendationHtml(issue)}
     </article>`,
           )
           .join("")}`,
@@ -140,13 +182,18 @@ function renderResults() {
 
 function renderWarnings() {
   const warnings = data?.warnings || [];
-  $("warnings-section").hidden = !warnings.length;
+  $("warnings-section").hidden = !warnings.length && !data?.notes?.length;
   $("warnings").innerHTML = warnings
     .map(
       (w) =>
         `<div class="warning-row"><strong>${escape(shortDay(w.sheet))}${w.cell ? ` · ${escape(w.cell)}` : ""}</strong><span>${escape(w.message)}</span></div>`,
     )
     .join("");
+  for (const note of data?.notes || []) {
+    // Notes are informational, not schedule violations or missing-class warnings.
+    const row = document.createElement('p'); row.className = 'muted'; row.textContent = note;
+    $('warnings').appendChild(row);
+  }
 }
 
 function renderSchedule() {
@@ -226,6 +273,7 @@ async function loadFile(file) {
   try {
     const loaded = await readExcelFile(file, window.XLSX);
     original = loaded;
+    resetRecommendations();
     data = loaded.data;
     checked = false;
     issues = [];
@@ -260,6 +308,7 @@ function apply(moves) {
       `Đã áp dụng ${moves.length} thay đổi và kiểm tra lại. Còn ${issues.length} vi phạm${data.warnings.length ? `, ${data.warnings.length} mục dữ liệu cần xem lại` : ""}.`,
     );
     render();
+    recommend();
   } catch (error) {
     $("preview-dialog").close();
     notify(error.message, true);
@@ -378,6 +427,7 @@ $("logout").addEventListener("click", () => {
     /* No persistent session. */
   }
   original = null;
+  resetRecommendations();
   data = null;
   checked = false;
   issues = [];
@@ -420,6 +470,7 @@ $("check").addEventListener("click", () => {
     checked = true;
     notify();
     render();
+    recommend();
   } catch (error) {
     notify(error.message, true);
   }
@@ -446,6 +497,13 @@ $("teacher-search").addEventListener("input", () => {
   icons();
 });
 $("fix").addEventListener("click", showPreview);
+$('results').addEventListener('click', event => {
+  const button = event.target.closest('[data-recommend]');
+  if (!button || busy || !recommendations) return;
+  const issue = issues[Number(button.dataset.recommend)];
+  const best = recommendations.find(r => r.id === issue?.id)?.moves[0];
+  if (best) apply([best]);
+});
 $("close-preview").addEventListener("click", () => $("preview-dialog").close());
 $("preview-dialog").addEventListener("close", () => {
   cancelWorker();
@@ -477,6 +535,7 @@ $("undo").addEventListener("click", () => {
     preview = null;
     notify("Đã hoàn tác lần thay đổi cuối và kiểm tra lại.");
     render();
+    recommend();
   } catch (error) {
     notify(error.message, true);
   }

@@ -11,6 +11,10 @@
   --red: #b63543;
   --amber: #8b650c;
 }
+.recommendation { margin-top: 14px; padding: 12px 0 0; border-top: 1px solid #dde5e1; font-size: 13px; }
+.recommendation strong { color: #16715e; }
+.recommendation p { margin: 7px 0; }
+.recommendation button { margin-top: 6px; }
 * {
   box-sizing: border-box;
   letter-spacing: 0;

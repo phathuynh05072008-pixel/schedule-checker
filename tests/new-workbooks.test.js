@@ -1,0 +1,45 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import * as XLSX from 'xlsx';
+import * as xml from '@xmldom/xmldom';
+import { unzipSync } from 'fflate';
+import { readExcelBytes } from '../parser.js';
+import { runRules } from '../rules.js';
+import { applyMove, suggestMoves } from '../solver.js';
+import { exportWorkbook } from '../exporter.js';
+
+const folder = process.env.TKB_L2_DIR;
+const files = ['TKB  L2 GV CHUYÊN  PHÂN HIỆU  NH 26-27.xlsx', 'TKB L2 GVCHUYÊN  ĐIỂM CHÍNH NH 26-27.xlsx'];
+test('L2 workbooks recognize renamed summary, absent totals, new activities, and safe export', { skip: !folder }, () => {
+  const branch = readExcelBytes(readFileSync(`${folder}/${files[0]}`), XLSX, files[0]);
+  assert.equal(branch.data.summary.length, 11);
+  assert.equal(branch.data.summary[0].sheetName, 'Tổng tiết');
+  assert.deepEqual(branch.data.stats, { days: 5, teachers: 11, occupiedSlots: 122 });
+  assert.deepEqual(branch.data.warnings, []); assert.deepEqual(runRules(branch.data), []);
+  const main = readExcelBytes(readFileSync(`${folder}/${files[1]}`), XLSX, files[1]);
+  assert.deepEqual(main.data.summary, []);
+  assert.deepEqual(main.data.warnings, []);
+  assert.equal(main.data.stats.occupiedSlots, 337);
+  assert.ok(main.data.days.every(d => d.totalColumn === null));
+  const issues = runRules(main.data); assert.equal(issues.length, 31);
+  const suggestions = suggestMoves(main.data, issues[0]);
+  assert.ok(suggestions.length > 0);
+  for (let i = 1; i < suggestions.length; i++) assert.ok(suggestions[i - 1].improvement >= suggestions[i].improvement);
+  const next = applyMove(main.data, suggestions[0]);
+  assert.ok(runRules(next).length < issues.length);
+  const bytes = exportWorkbook(main, [suggestions[0]], xml);
+  const reread = readExcelBytes(bytes, XLSX, 'export.xlsx');
+  assert.deepEqual(reread.workbook.SheetNames, main.workbook.SheetNames);
+  assert.equal(runRules(reread.data).length, runRules(next).length);
+  assert.ok(reread.data.days.every(d => d.totalColumn === null));
+  const old = unzipSync(main.originalBytes), updated = unzipSync(bytes);
+  for (const name of ['xl/worksheets/sheet6.xml', 'xl/worksheets/sheet7.xml', 'xl/styles.xml']) assert.deepEqual(updated[name], old[name]);
+  // Renaming a day must still export back to the actual source sheet name.
+  const workbook = structuredClone(main.workbook);
+  workbook.Sheets[' t2 '] = workbook.Sheets['THỨ HAI']; delete workbook.Sheets['THỨ HAI']; workbook.SheetNames[0] = ' t2 ';
+  const renamed = readExcelBytes(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }), XLSX, 'renamed.xlsx');
+  const result = readExcelBytes(exportWorkbook(renamed, [suggestions[0]], xml), XLSX, 'out.xlsx');
+  assert.equal(result.workbook.SheetNames[0], ' t2 ');
+  assert.equal(runRules(result.data).length, runRules(next).length);
+});

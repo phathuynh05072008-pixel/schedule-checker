@@ -145,15 +145,15 @@ export function exportWorkbook(original, moves, xml = globalThis) {
         before = original.data.days[d].rows[r];
       for (let s = 0; s < row.lessons.length; s++) {
         if (row.lessons[s].raw !== before.lessons[s].raw)
-          add(day.name, row.lessons[s].cell, row.lessons[s].raw);
+          add(day.sourceName || day.name, row.lessons[s].cell, row.lessons[s].raw);
       }
       if (row.actualTotal !== before.actualTotal) {
-        add(day.name, row.sourceTotal.cell, row.actualTotal + (row.sourceTotal.includesAssembly ? row.assemblyCount : 0), true);
+        if (row.sourceTotal) add(day.sourceName || day.name, row.sourceTotal.cell, row.actualTotal + (row.sourceTotal.includesAssembly ? row.assemblyCount : 0), true);
         const summary = original.data.summary.find(
           (item) => item.teacherKey === row.teacherKey,
         );
         if (summary)
-          add("Sheet1", summary.dailyTotals[d].cell, row.actualTotal + (summary.dailyTotals[d].includesAssembly ? row.assemblyCount : 0), true);
+          add(summary.sheetName || "Sheet1", summary.dailyTotals[d].cell, row.actualTotal + (summary.dailyTotals[d].includesAssembly ? row.assemblyCount : 0), true);
       }
     }
   }

@@ -34,6 +34,8 @@ CSP chặn kết nối `fetch`, XHR và WebSocket.
 
 1. Đăng nhập, chọn hoặc kéo thả một tệp `.xlsx` (tối đa 20 MB).
 2. Nhấn **Kiểm tra**. Xem lỗi theo loại hoặc theo thứ, cùng ô Excel và giáo viên liên quan.
+   Phương án ưu tiên tự xuất hiện dưới từng lỗi khi tìm xong, kèm vị trí chuyển cụ thể.
+   Chỉ khi nhấn **Xác nhận áp dụng** lịch mới thay đổi. Sau khi sửa hoặc hoàn tác, gợi ý được tính lại.
 3. Mở **Lịch theo ngày** để xem lịch và tìm giáo viên/môn. Ô lỗi, ô chưa rõ lớp và ô
    đã thay đổi có đánh dấu riêng.
 4. Nhấn **Chỉnh sửa** để xem tối đa 3 cách chuyển một tiết cho mỗi vi phạm.
@@ -53,9 +55,9 @@ CSP chặn kết nối `fetch`, XHR và WebSocket.
 | Tiết lớp/buổi | Tối đa 3 tiết sáng, 2 tiết chiều; đếm mọi lần xuất hiện kể cả trùng tiết. |
 
 Tên giáo viên được chuẩn hóa NFC, khoảng trắng và khóa chữ hoa. Tiền tố lớp gồm
-HĐTN, CN, TNXH, TCTV, TCT, ĐĐ; nhận cả `ĐĐ4A` không có khoảng trắng.
+HĐTN, CN, TNXH, TCTV, TCT, LTT, LTTV, ĐĐ; nhận cả `ĐĐ4A` không có khoảng trắng.
 Ô chưa rõ lớp vẫn tính vào số tiết giáo viên nhưng không suy đoán tên lớp cho luật 1/3.
-Ngoại lệ: `CC phân hiệu` tại tiết 1 sáng Thứ Hai là chào cờ chung, không tính vào
+Ngoại lệ: `CC phân hiệu` hoặc `CC` tại tiết 1 sáng Thứ Hai là chào cờ chung, không tính vào
 số tiết chuyên của giáo viên hoặc thống kê tiết chuyên trong tuần. Ô này được giữ
 nguyên, không báo chưa rõ lớp và không tự động chuyển. Solver không xếp tiết chuyên
 vào tiết 1 sáng Thứ Hai, kể cả khi ô của giáo viên đang trống.
@@ -66,12 +68,20 @@ Nếu còn ô chưa rõ, kết quả không khẳng định toàn bộ lịch h�
 
 ## Cấu trúc file và giới hạn
 
-- Cần năm sheet `THỨ HAI`, `THỨ BA`, `THỨ TƯ`, `THỨ NĂM`, `THỨ SÁU` và `Sheet1`.
-- Header lịch ở dòng 7–8, dữ liệu từ dòng 9. Thứ Tư chỉ có bốn tiết sáng.
+- Cần năm sheet lịch Thứ Hai đến Thứ Sáu. Nhận tên có khoảng trắng/chữ thường/Unicode
+  khác cách mã hóa, `T2`–`T6`, `Thứ 2`–`Thứ 6`; hoặc nhận thứ qua tiêu đề cột A nếu tên tab khác.
+- Tự tìm header Môn/Tên GV trong 30 dòng đầu; header buổi và tiết vẫn cần đúng cấu trúc.
+  Thứ Tư chỉ có bốn tiết sáng.
 - Môn ở A, tên giáo viên ở B; hỗ trợ tên gộp A:B trên một dòng như file mẫu.
-- Tổng ngày ở K, riêng Thứ Tư ở H. `Sheet1` có tên ở C hoặc gộp B:C, tổng ngày D:H,
-  tổng tuần I. Đây là định dạng cụ thể của mẫu đã cung cấp, không phải trình đọc mọi mẫu TKB.
-- Sheet bổ sung được giữ lại. Sheet thiếu hoặc sai header được báo lỗi.
+- Cột tổng ngày được tìm trong 5 cột ngay sau lịch, chỉ khi xác định được một cột.
+  Thiếu cột tổng không chặn kiểm tra; web tự đếm và không tự thêm cột khi xuất.
+- Bảng tổng hợp là tùy chọn, nhận bằng header Tên GV và 5 thứ liên tiếp thay vì tên `Sheet1`.
+  Hỗ trợ `Tổng tiết` có header HAI/BA/TƯ/NĂM/SÁU; tên GV ở B, C hoặc D.
+  Bảng cũ (`CŨ`, `OLD`, `BACKUP`, `LƯU`) được giữ nguyên, không dùng đối chiếu hoặc cập nhật.
+  Thiếu bảng, sai cấu trúc hoặc nhiều bảng không rõ lựa chọn: ghi chú và tiếp tục kiểm tra lịch.
+- Sheet bổ sung được giữ lại. Sheet lịch bắt buộc thiếu hoặc không thể đọc an toàn vẫn báo lỗi.
+  Không thể nhận diện mọi bố cục Excel tùy ý; bố cục không có giáo viên, thứ, buổi, tiết rõ ràng
+  cần được chuẩn hóa trước. Ứng dụng xử lý từng file riêng, chưa đối chiếu trùng lịch giữa hai cơ sở.
 - Tên giáo viên trùng trong cùng sheet bị từ chối. Hai người trùng tên nhưng xuất hiện
   ở những ngày khác nhau không thể phân biệt chắc chắn; cần định danh khác nhau trong tên.
 - Ô lịch gộp, chứa công thức hoặc lỗi Excel bị từ chối để tránh hiểu sai một tiết.
@@ -79,8 +89,12 @@ Nếu còn ô chưa rõ, kết quả không khẳng định toàn bộ lịch h�
 
 ## Tìm phương án và giữ file Excel
 
-`solver.js` triển khai heuristic chuyển một tiết sang ô trống: ưu tiên cùng buổi/cùng
-ngày trước ngày khác. Chỉ chuyển tiết đã nhận diện được lớp, giữ nguyên giáo viên và
+`solver.js` xét tất cả cách chuyển một tiết sang ô trống hợp lệ cho từng lỗi, xếp hạng
+theo mức giảm vi phạm (tổng `actual - limit`) lớn nhất, rồi cùng buổi/cùng ngày,
+khoảng cách ngày và khoảng cách tiết nhỏ nhất. Trả tối đa 3 phương án, phương án đầu
+hiển thị ngay khi kiểm tra. Đây là tối ưu trong các cách chuyển một tiết theo tiêu chí
+này, không bảo đảm tối ưu toàn cục hay các ràng buộc chưa được cung cấp.
+Chỉ chuyển tiết đã nhận diện được lớp, giữ nguyên giáo viên và
 nội dung hoạt động; không giả định giáo viên thiếu trong sheet là rảnh. Không chọn
 tiết đích nếu có ô chưa rõ lớp ở cùng thời điểm. Mỗi phương án phải giảm mức vi phạm
 và không tạo lỗi mới hoặc làm nặng thêm lỗi cũ qua chính `runRules`.
@@ -98,7 +112,7 @@ SheetJS 0.20.3 đọc và kiểm tra workbook. Phần xuất dùng `fflate` và 
 trực tiếp các ô lịch trong gói XLSX gốc, tránh việc ghi lại toàn workbook làm mất
 các định dạng mà SheetJS Community không bảo đảm giữ nguyên.
 Giữ phần styles, ảnh, đối tượng, tiêu đề, merge, thiết lập in và các phần không sửa.
-Các tổng ngày và tổng ngày trên `Sheet1` liên quan được cập nhật cả giá trị cache,
+Các tổng ngày và tổng ngày trên bảng tổng hợp đã nhận diện được cập nhật cả giá trị cache,
 giữ công thức có sẵn. Tổng tuần không đổi vì tiết vẫn thuộc cùng giáo viên.
 Đặt yêu cầu Excel tính lại công thức khi mở. Phần ZIP được nén lại nên byte của
 toàn file khác, nhưng nội dung các phần không liên quan được giữ nguyên từng byte.
@@ -185,6 +199,17 @@ chỉ mở đọc và không lưu file gốc:
   Không lưu thay đổi vào file gốc. Chưa kiểm thử trên mọi phiên bản Excel hay LibreOffice.
 
 ## Đóng gói và GitHub Pages
+
+### Cập nhật 21/09/2026
+
+Hai file L2 đã được kiểm tra trực tiếp: phân hiệu có 11 giáo viên, 122 tiết chuyên,
+không có lỗi theo 3 luật; điểm chính có 18 giáo viên, 337 tiết và 31 vi phạm.
+31 vi phạm đều có phương án chuyển một tiết hợp lệ ở trạng thái ban đầu. Gợi ý của
+các lỗi không được áp dụng độc lập cùng lúc; hệ thống luôn kiểm tra lại sau mỗi lần sửa.
+Đã kiểm tra xuất/đọc lại khi không có tổng, giữ nguyên sheet CŨ/Sheet2 và styles,
+đổi tên sheet lịch, cập nhật đúng bảng Tổng tiết khi chuyển tiết qua ngày khác.
+Kiểm thử Chrome xác minh hai file, gợi ý trực tiếp, xác nhận áp dụng, thay file không
+giữ gợi ý cũ và màn hình 390 px không tràn ngang.
 
 ```powershell
 npm run build

@@ -16,6 +16,9 @@ test('cross-day moves retain assembly and the original inclusive Excel totals', 
   book.Sheets['THỨ HAI'].K9.v += 1;
   book.Sheets.Sheet1.D6.v += 1;
   book.Sheets.Sheet1.I6.v += 1;
+  book.Sheets['Tổng tiết'] = book.Sheets.Sheet1;
+  delete book.Sheets.Sheet1;
+  book.SheetNames[5] = 'Tổng tiết';
   const original = readExcelBytes(XLSX.write(book, { type: 'buffer', bookType: 'xlsx' }), XLSX, 'fixture.xlsx');
   const teacher = original.data.days[0].rows.find(r => r.row === 24);
   const moves = [{ teacherKey: teacher.teacherKey, raw: '1G', from: { day: 'THỨ HAI', cell: 'D24' }, to: { day: 'THỨ BA', cell: 'G24' } }];
@@ -25,6 +28,7 @@ test('cross-day moves retain assembly and the original inclusive Excel totals', 
   assert.equal(row.sourceTotal.value, 6);
   assert.equal(row.lessons[0].raw, 'CC phân hiệu');
   assert.equal(row.lessons[0].kind, 'assembly');
+  assert.equal(reopened.data.summary[0].sheetName, 'Tổng tiết');
   assert.equal(reopened.data.summary.find(r => r.teacherKey === teacher.teacherKey).dailyTotals[0].value, 6);
   assert.ok(!reopened.data.warnings.some(w => w.code === 'TOTAL_MISMATCH'));
 });
