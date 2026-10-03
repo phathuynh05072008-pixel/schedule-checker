@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { DAY_NAMES, parseClass, parseWorkbook, readExcelBytes, readExcelFile } from '../parser.js';
+import { DAY_NAMES, parseClass, parseWorkbook, readExcelBytes, readExcelFile } from '../src/parser.js';
 
 function fixture() {
   const workbook = { SheetNames: [...DAY_NAMES, 'Sheet1'], Sheets: {} };
@@ -90,6 +90,19 @@ test('reads merged subjects, exact positions, daily totals without mutation', ()
   assert.equal(result.days[2].slots.length, 4); assert.deepEqual(result.warnings, []);
   assert.equal(JSON.stringify(workbook), before);
 });
+test('Wednesday supports both the original morning-only and an afternoon timetable', () => {
+  const workbook = fixture();
+  const wednesday = workbook.Sheets['THỨ TƯ'];
+  assert.equal(parseWorkbook(workbook).days[2].slots.length, 4);
+  delete wednesday.H9; delete wednesday.H10;
+  wednesday.G7 = { v: 'CHIỀU' };
+  wednesday['!merges'].push({ s: { r: 6, c: 6 }, e: { r: 6, c: 8 } });
+  for (const [cell, value] of [['G8', 'TIẾT 1'], ['H8', 'TIẾT 2'], ['I8', 'TIẾT 3'], ['G9', '1A'], ['H9', '1A'], ['I9', '2A']]) wednesday[cell] = { v: value };
+  const data = parseWorkbook(workbook);
+  assert.equal(data.days[2].slots.length, 7);
+  assert.equal(data.days[2].rows[0].lessons.filter(l => l.session === 'Chiều' && l.className).length, 3);
+});
+
 test('reads horizontal merged teacher names without assigning a fake subject', () => {
   const workbook = fixture(); const day = workbook.Sheets['THỨ HAI'];
   day['!merges'].pop(); day['!merges'] = day['!merges'].filter(m => m.s.r !== 8);

@@ -60,11 +60,11 @@ function checkTotal(sheet, cell, actual, warnings, sheetName, assemblyCount = 0)
 }
 
 function parseDay(sheet, name, warnings) {
-  const morningOnly = name === 'THỨ TƯ';
   const headerRow = Array.from({ length: Math.min(lastRow(sheet), 30) }, (_, i) => i + 1)
     .find(row => key(mergedValue(sheet, 0, row)) === 'MÔN' && key(mergedValue(sheet, 1, row)) === 'TÊN GV');
   if (!headerRow) throw new ParseError(`${name}: không tìm thấy tiêu đề Môn và Tên GV ở cột A, B.`);
-  const slotCount = morningOnly ? 4 : 7;
+  const hasAfternoon = key(mergedValue(sheet, 6, headerRow)) === 'CHIỀU';
+  const slotCount = name === 'THỨ TƯ' && !hasAfternoon ? 4 : 7;
   const slots = Array.from({ length: slotCount }, (_, i) => ({
     column: i + 2, session: i < 4 ? 'Sáng' : 'Chiều', period: i < 4 ? i + 1 : i - 3,
   }));
@@ -73,9 +73,6 @@ function parseDay(sheet, name, warnings) {
         key(valueAt(sheet, slot.column, headerRow + 1)) !== `TIẾT ${slot.period}`) {
       throw new ParseError(`${name}!${address(slot.column, headerRow + 1)}: tiêu đề buổi hoặc tiết không đúng cấu trúc.`);
     }
-  }
-  if (morningOnly && [6, 7, 8].some(c => key(mergedValue(sheet, c, headerRow)) === 'CHIỀU')) {
-    throw new ParseError('THỨ TƯ chỉ được có buổi Sáng.');
   }
   const totalCandidates = Array.from({ length: 5 }, (_, i) => slotCount + 2 + i).filter(column =>
     /TỔNG/.test(key(mergedValue(sheet, column, headerRow))) ||

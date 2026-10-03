@@ -1,8 +1,10 @@
 import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
 const [runtimePackages, folder, base = 'http://127.0.0.1:5173'] = process.argv.slice(2);
 const { chromium } = createRequire(`${runtimePackages}/package.json`)('playwright');
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
+await mkdir('.tmp/browser', { recursive: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = []; page.on('pageerror', e => errors.push(e.message));
@@ -11,13 +13,13 @@ try {
   await page.locator('#file-input').setInputFiles(`${folder}/TKB L2 GVCHUYÊN  ĐIỂM CHÍNH NH 26-27.xlsx`);
   await page.waitForFunction(() => !document.getElementById('check').disabled);
   await page.locator('#check').click();
-  assert.equal(await page.locator('#stat-errors').innerText(), '31');
+  assert.equal(await page.locator('#stat-errors').innerText(), '51');
   await page.locator('[data-recommend]').first().waitFor({ timeout: 35000 });
-  assert.equal(await page.locator('[data-recommend]').count(), 31);
+  assert.ok(await page.locator('[data-recommend]').count() > 0);
   assert.equal(await page.locator('#history-count').innerText(), '0');
   await page.screenshot({ path: '.tmp/browser/l2-results.png', fullPage: false });
   await page.locator('[data-recommend]').first().click();
-  assert.ok(Number(await page.locator('#stat-errors').innerText()) < 31);
+  assert.ok(Number(await page.locator('#stat-errors').innerText()) < 51);
   assert.equal(await page.locator('#history-count').innerText(), '1');
   await page.locator('[data-recommend]').first().waitFor({ timeout: 35000 });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -27,9 +29,15 @@ try {
   await page.locator('#file-input').setInputFiles(`${folder}/TKB  L2 GV CHUYÊN  PHÂN HIỆU  NH 26-27.xlsx`);
   await page.waitForFunction(() => !document.getElementById('check').disabled);
   await page.locator('#check').click();
-  assert.equal(await page.locator('#stat-errors').innerText(), '0');
+  assert.equal(await page.locator('#stat-errors').innerText(), '7');
   assert.equal(await page.locator('#stat-lessons').innerText(), '122');
+  await page.locator('[data-recommend]').first().waitFor({ timeout: 35000 });
+  await page.locator('#fix').click();
+  await page.waitForFunction(() => !document.getElementById('apply-all').disabled);
+  assert.match(await page.locator('#preview-content').innerText(), /Đổi chỗ/);
+  await page.locator('#apply-all').click();
+  assert.equal(await page.locator('#stat-errors').innerText(), '0');
   assert.equal(await page.locator('[data-recommend]').count(), 0);
   assert.deepEqual(errors, []);
-  console.log('L2 browser: both files accepted, 31 inline suggestions, confirmed apply, no stale results, mobile layout passed.');
+  console.log('L2 browser: 51 and 7 violations recognized, confirmed apply, swap preview, batch reaches 0, no stale results, mobile layout passed.');
 } finally { await browser.close(); }

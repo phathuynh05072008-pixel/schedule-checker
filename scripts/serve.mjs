@@ -1,9 +1,8 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { webFiles } from './web-files.mjs';
 
-const allowed = new Set(['index.html', 'styles.css', 'ui.js', 'parser.js', 'rules.js', 'solver.js',
-  'solver-worker.js', 'exporter.js', 'config.js', 'assets/favicon.svg',
-  'vendor/xlsx.full.min.js', 'vendor/fflate.js', 'vendor/lucide.min.js']);
+const allowed = new Set(webFiles);
 const mime = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8',
   css: 'text/css; charset=utf-8', svg: 'image/svg+xml' };
 const server = createServer(async (req, res) => {

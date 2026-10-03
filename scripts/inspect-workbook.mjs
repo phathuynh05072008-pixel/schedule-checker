@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { parseWorkbook, readExcelBytes } from '../parser.js';
-import { runRules } from '../rules.js';
+import { parseWorkbook, readExcelBytes } from '../src/parser.js';
+import { runRules } from '../src/rules.js';
 
 const [input, output] = process.argv.slice(2);
 if (!input) {

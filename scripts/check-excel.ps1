@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$OriginalPath, [Parameter(Mandatory=$true)][string]$ExportedPath)
+param([Parameter(Mandatory=$true)][string]$OriginalPath, [Parameter(Mandatory=$true)][string]$ExportedPath, [Parameter(Mandatory=$true)][string]$ExpectedPath)
 $ErrorActionPreference = 'Stop'
 $excelApp = $null
 $sourceBook = $null
@@ -29,14 +29,17 @@ try {
     }
   }
   $excelApp.CalculateFullRebuild()
-  $monday = $exportedBook.Worksheets.Item('THỨ HAI')
-  $tuesday = $exportedBook.Worksheets.Item('THỨ BA')
-  $thursday = $exportedBook.Worksheets.Item('THỨ NĂM')
-  if ($monday.Range('D24').Value2 -ne '1G') { throw 'Unrelated lesson changed.' }
-  if ($monday.Range('C24').Value2 -ne 'CC phân hiệu') { throw 'Assembly changed.' }
-  if ($monday.Range('K24').Value2 -ne 7) { throw 'Original Excel total including assembly changed.' }
-  if ($thursday.Range('C32').Value2 -ne 'TCTV 2H' -or $thursday.Range('G32').Value2 -ne $null) { throw 'Class move incorrect.' }
-  [pscustomobject]@{ passed = $true; excelVersion = $excelApp.Version; sheets = $exportedBook.Worksheets.Count; formattingSamples = $checks; nativeRecalculation = 'passed'; sourceSaved = $false } | ConvertTo-Json
+  $taskExpected = Get-Content -LiteralPath $ExpectedPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  $taskValueChecks = 0
+  foreach ($taskSheet in $taskExpected) {
+    $taskWorksheet = $exportedBook.Worksheets.Item($taskSheet.name)
+    foreach ($taskCell in $taskSheet.cells.PSObject.Properties) {
+      $taskActual = $taskWorksheet.Range($taskCell.Name).Value2
+      if ([string]$taskActual -cne [string]$taskCell.Value) { throw "Recalculated value differs: $($taskSheet.name)!$($taskCell.Name): expected '$($taskCell.Value)', actual '$taskActual'" }
+      $taskValueChecks++
+    }
+  }
+  [pscustomobject]@{ passed = $true; excelVersion = $excelApp.Version; sheets = $exportedBook.Worksheets.Count; formattingSamples = $checks; valueChecks = $taskValueChecks; nativeRecalculation = 'passed'; sourceSaved = $false } | ConvertTo-Json
 } finally {
   if ($exportedBook) { $exportedBook.Close($false) }
   if ($sourceBook) { $sourceBook.Close($false) }

@@ -4,10 +4,10 @@ import { readFileSync } from 'node:fs';
 import * as XLSX from 'xlsx';
 import * as xml from '@xmldom/xmldom';
 import { unzipSync, strFromU8 } from 'fflate';
-import { readExcelBytes } from '../parser.js';
-import { runRules } from '../rules.js';
-import { buildPlan, applyPlan } from '../solver.js';
-import { exportWorkbook } from '../exporter.js';
+import { readExcelBytes } from '../src/parser.js';
+import { runRules } from '../src/rules.js';
+import { buildPlan, applyPlan } from '../src/solver.js';
+import { exportWorkbook } from '../src/exporter.js';
 
 const sample = process.env.TKB_SAMPLE_XLSX;
 test('cross-day moves retain assembly and the original inclusive Excel totals', { skip: !sample }, () => {
@@ -35,10 +35,10 @@ test('cross-day moves retain assembly and the original inclusive Excel totals', 
 test('real SheetJS read, solve, export and reopen preserve workbook content and formatting', { skip: !sample }, () => {
   const original = readExcelBytes(readFileSync(sample), XLSX, 'sample.xlsx');
   assert.deepEqual(original.data.stats, { days: 5, teachers: 24, occupiedSlots: 454 });
-  assert.equal(runRules(original.data).length, 1);
+  assert.equal(runRules(original.data).length, 15);
   const snapshot = structuredClone(original.data);
   const plan = buildPlan(original.data);
-  assert.equal(plan.remaining, 0); assert.equal(plan.moves.length, 1);
+  assert.equal(plan.remaining, 0); assert.ok(plan.moves.length > 1);
   const next = applyPlan(original.data, plan.moves);
   const bytes = exportWorkbook(original, plan.moves, xml);
   const reopened = readExcelBytes(bytes, XLSX, 'reopened.xlsx');
@@ -83,7 +83,15 @@ test('real SheetJS read, solve, export and reopen preserve workbook content and 
     for (const address of new Set([...beforeCells.keys(), ...afterCells.keys()])) {
       const ac = beforeCells.get(address), bc = afterCells.get(address);
       if (ac && bc && serialize(ac) === serialize(bc)) continue;
-      assert.ok(ac && bc, 'Sample export must retain its existing styled cells');
+      if (!ac) {
+        const sheetIndex = Number(path.match(/sheet(\d+)/)[1]) - 1;
+        const day = next.days.find(d => (d.sourceName || d.name) === reopened.workbook.SheetNames[sheetIndex]);
+        assert.ok(day?.rows.some(row => row.lessons.some(l => l.cell === address && l.raw)), `new cell belongs to a moved lesson: ${path}!${address}`);
+        assert.ok(bc); assert.equal(bc.getAttribute('s') || '', '');
+        bc.parentNode.removeChild(bc);
+        continue;
+      }
+      assert.ok(bc, 'Existing styled cells must be retained');
       for (const cell of [ac, bc]) {
         cell.removeAttribute('t');
         for (const child of Array.from(cell.childNodes)) if (['v', 'is'].includes(child.localName)) cell.removeChild(child);
@@ -92,7 +100,7 @@ test('real SheetJS read, solve, export and reopen preserve workbook content and 
     assert.equal(serialize(a), serialize(b), `preserved structure ${path}`);
   }
   assert.equal(reopened.workbook.Sheets['THỨ HAI'].C24.v, 'CC phân hiệu');
-  assert.equal(reopened.data.days[0].rows.find(r => r.row === 24).actualTotal, 6);
+  assert.equal(reopened.data.days[0].rows.find(r => r.row === 24).assemblyCount, 1);
   assert.ok(changedParts.length >= 2);
   assert.deepEqual(exportWorkbook(original, [], xml), original.originalBytes);
 });

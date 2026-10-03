@@ -1,4 +1,4 @@
-import { unzipSync, zipSync, strFromU8, strToU8 } from "./vendor/fflate.js";
+import { unzipSync, zipSync, strFromU8, strToU8 } from "../vendor/fflate.js";
 import { applyPlan } from "./solver.js";
 
 const NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";

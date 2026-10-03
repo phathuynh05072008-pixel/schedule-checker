@@ -3,7 +3,18 @@ import { isTeachingLesson } from './parser.js';
 export const DAILY_LIMITS = Object.freeze({
   'THỨ HAI': 6, 'THỨ BA': 7, 'THỨ TƯ': 4, 'THỨ NĂM': 7, 'THỨ SÁU': 6,
 });
-export const SESSION_LIMITS = Object.freeze({ 'Sáng': 3, 'Chiều': 2 });
+export const MORNING_LIMITS = Object.freeze({
+  'THỨ HAI': 1, 'THỨ BA': 3, 'THỨ TƯ': 2, 'THỨ NĂM': 3, 'THỨ SÁU': 2,
+});
+export const AFTERNOON_LIMIT = 2;
+
+// Shared by validation and every solver destination check.
+export function classSessionLimit(day, session) {
+  if (!(day in MORNING_LIMITS)) throw new Error(`Chưa có giới hạn số tiết cho ${day}.`);
+  if (session === 'Sáng') return MORNING_LIMITS[day];
+  if (session === 'Chiều') return AFTERNOON_LIMIT;
+  throw new Error(`Chưa có giới hạn số tiết cho buổi ${session}.`);
+}
 
 function entries(day) {
   return day.rows.flatMap(teacher => teacher.lessons
@@ -66,8 +77,7 @@ export function checkClassSessionLimits(day) {
   return group(entries(day).filter(item => item.className), item => [item.session, item.className])
     .flatMap(items => {
       const { session, className } = items[0];
-      const limit = SESSION_LIMITS[session];
-      if (limit === undefined) throw new Error(`Chưa có giới hạn số tiết cho buổi ${session}.`);
+      const limit = classSessionLimit(day.name, session);
       if (items.length <= limit) return [];
       return [violation('CLASS_SESSION_LIMIT', day, [session, className], {
         session, className, actual: items.length, limit,
@@ -78,7 +88,23 @@ export function checkClassSessionLimits(day) {
     });
 }
 
-export const RULES = Object.freeze([checkClassConflicts, checkTeacherDailyLimits, checkClassSessionLimits]);
+export function checkClassLessonGaps(day) {
+  return group(entries(day).filter(item => item.className),
+    item => [item.teacherKey, item.session, item.className]).flatMap(items => {
+    if (items.length < 2) return [];
+    const lessons = [...items].sort((a, b) => a.period - b.period);
+    const actual = lessons.at(-1).period - lessons[0].period + 1 - lessons.length;
+    if (actual <= 0) return [];
+    const { teacherKey, teacherName, session, className } = lessons[0];
+    return [violation('CLASS_LESSON_GAPS', day, [teacherKey, session, className], {
+      teacherKey, teacherName, session, className, actual, limit: 0, lessons,
+      message: `${day.name}, ${session}: ${teacherName} dạy lớp ${className} ở tiết ${lessons.map(l => l.period).join(', ')} không liền nhau.`,
+      suggestion: 'Xếp các tiết cùng lớp của giáo viên liền nhau trong buổi; không xen lớp khác hoặc tiết trống.',
+    })];
+  });
+}
+
+export const RULES = Object.freeze([checkClassConflicts, checkTeacherDailyLimits, checkClassSessionLimits, checkClassLessonGaps]);
 
 export function runRules(data, rules = RULES) {
   return data.days.flatMap(day => rules.flatMap(rule => rule(day)));

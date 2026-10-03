@@ -1,5 +1,5 @@
 import { DAY_NAMES, readExcelFile } from "./parser.js";
-import { runRules } from "./rules.js";
+import { runRules, RULES, classSessionLimit } from "./rules.js";
 import { applyPlan } from "./solver.js";
 import { exportWorkbook } from "./exporter.js";
 import { ACCESS_PASSWORD } from "./config.js";
@@ -19,6 +19,7 @@ const labels = {
   CLASS_CONFLICT: "Trùng lớp",
   TEACHER_DAILY_LIMIT: "Vượt số tiết giáo viên",
   CLASS_SESSION_LIMIT: "Vượt số tiết lớp",
+  CLASS_LESSON_GAPS: "Tiết cùng lớp không liền nhau",
 };
 const shortDay = (name) =>
   name.charAt(0) + name.slice(1).toLocaleLowerCase("vi");
@@ -72,7 +73,7 @@ function recommend() {
 function recommendationHtml(issue) {
   if (!recommendations) return `<p class="recommendation muted" role="status">${escape(recommendationStatus || 'Nhấn Kiểm tra để tìm phương án.')}</p>`;
   const best = recommendations.find(r => r.id === issue.id)?.moves[0];
-  if (!best) return '<p class="recommendation muted">Không tìm được cách chuyển một tiết hợp lệ cho lỗi này; cần điều chỉnh thủ công.</p>';
+  if (!best) return '<p class="recommendation muted">Chưa tìm được cách chuyển hoặc đổi chỗ hợp lệ cho lỗi này; cần điều chỉnh thủ công.</p>';
   return `<div class="recommendation"><strong>Phương án ưu tiên · ${escape(best.teacherName)} · ${escape(best.raw)}</strong><p>${escape(describe(best))}</p><p class="muted">Giảm ${best.improvement} mức vượt giới hạn; ưu tiên giảm lỗi nhiều nhất, giữ cùng buổi/ngày, rồi vị trí gần nhất. Chưa áp dụng vào lịch.</p><button class="secondary" data-recommend="${issues.indexOf(issue)}">${icon('check')}Xác nhận áp dụng</button></div>`;
 }
 
@@ -113,7 +114,7 @@ function render() {
   $("results-title").textContent = checked
     ? issues.length
       ? `${issues.length} vi phạm cần điều chỉnh`
-      : "Đã kiểm tra 3 quy tắc"
+      : `Đã kiểm tra ${RULES.length} quy tắc`
     : "Kết quả kiểm tra";
   $("results-subtitle").textContent = checked
     ? `${original.fileName}${transactions.length ? " · Đã cập nhật trong phiên" : ""}`
@@ -139,7 +140,7 @@ function renderResults() {
   }
   if (!issues.length) {
     $("results").innerHTML =
-      `<div class="success">${icon(data.warnings.length ? "circle-alert" : "circle-check")}<div><strong>${data.warnings.length ? "Không phát hiện vi phạm trong dữ liệu đã nhận diện" : "Thời khóa biểu hợp lệ theo 3 quy tắc"}</strong><p>${data.warnings.length ? "Vẫn còn dữ liệu cần xem lại bên dưới trước khi chốt lịch." : "Không có lỗi trùng lớp hoặc vượt giới hạn số tiết."}</p></div></div>`;
+      `<div class="success">${icon(data.warnings.length ? "circle-alert" : "circle-check")}<div><strong>${data.warnings.length ? "Không phát hiện vi phạm trong dữ liệu đã nhận diện" : `Thời khóa biểu hợp lệ theo ${RULES.length} quy tắc`}</strong><p>${data.warnings.length ? "Vẫn còn dữ liệu cần xem lại bên dưới trước khi chốt lịch." : "Không có lỗi trùng lớp, vượt giới hạn hoặc tiết cùng lớp bị xen kẽ."}</p></div></div>`;
     return;
   }
   const filtered = issues.filter(
@@ -232,7 +233,9 @@ function renderSchedule() {
 }
 
 function describe(move) {
-  return `${shortDay(move.from.day)} · ${move.from.session} tiết ${move.from.period} (${move.from.cell}) → ${shortDay(move.to.day)} · ${move.to.session} tiết ${move.to.period} (${move.to.cell})`;
+  const from = `${shortDay(move.from.day)} · ${move.from.session} tiết ${move.from.period} (${move.from.cell})`;
+  const to = `${shortDay(move.to.day)} · ${move.to.session} tiết ${move.to.period} (${move.to.cell})`;
+  return move.type === 'swap' ? `Đổi chỗ ${move.raw} tại ${from} với ${move.swapRaw} tại ${to}` : `${from} → ${to}`;
 }
 
 function renderHistory() {
@@ -319,7 +322,7 @@ function showPreview() {
   if (busy || !data || !issues.length) return;
   preview = null;
   $("apply-all").disabled = true;
-  $("plan-summary").textContent = "Đang tìm phương án…";
+  $("plan-summary").textContent = "Đang tìm phương án chuyển và đổi chỗ…";
   $("preview-content").innerHTML =
     '<div class="empty"><span class="spinner"></span><p>Đang kiểm tra các vị trí còn trống…</p></div>';
   $("preview-dialog").showModal();
@@ -350,17 +353,20 @@ function showPreview() {
       }
       preview = result;
       $("preview-content").innerHTML =
-        `<p class="muted">Các phương án chỉ đối chiếu lịch giáo viên chuyên và 3 quy tắc hiện có. ${data.warnings.length ? "Dữ liệu chưa rõ lớp vẫn cần kiểm tra thủ công." : ""}</p>` +
+        `<p class="muted">Các phương án đối chiếu lịch giáo viên chuyên theo ${RULES.length} quy tắc, gồm tiết cùng lớp phải liền nhau trong buổi. ${data.warnings.length ? "Dữ liệu chưa rõ lớp vẫn cần kiểm tra thủ công." : ""}</p>` +
         issues
           .map((issue, i) => {
             const options =
               result.suggestions.find((s) => s.id === issue.id)?.moves || [];
-            return `<section class="preview-group"><div class="group-heading">${escape(labels[issue.rule])}</div><h3>${escape(issue.message)}</h3>${options.length ? options.map((m, j) => `<div class="option"><div><strong>${escape(m.teacherName)} · ${escape(m.raw)}</strong><p>${escape(describe(m))}</p></div><button class="secondary" data-apply-issue="${i}" data-option="${j}">${icon("check")}Áp dụng</button></div>`).join("") : '<p class="error-text">Không tìm được phương án tự động, cần điều chỉnh thủ công. Chưa có ô trống xác định được lớp và thỏa cả 3 quy tắc bằng cách chuyển một tiết.</p>'}</section>`;
+            return `<section class="preview-group"><div class="group-heading">${escape(labels[issue.rule])}</div><h3>${escape(issue.message)}</h3>${options.length ? options.map((m, j) => `<div class="option"><div><strong>${escape(m.teacherName)} · ${escape(m.raw)}</strong><p>${escape(describe(m))}</p></div><button class="secondary" data-apply-issue="${i}" data-option="${j}">${icon("check")}Áp dụng</button></div>`).join("") : '<p class="error-text">Chưa tìm được phương án chuyển hoặc đổi chỗ hợp lệ riêng cho lỗi này. Xem kế hoạch bên dưới hoặc điều chỉnh thủ công.</p>'}</section>`;
           })
           .join("") +
         (result.plan.moves.length
           ? `<h3 class="plan-label">Danh sách áp dụng tất cả · ${result.plan.moves.length} thay đổi</h3><div class="plan-list">${result.plan.moves.map((m) => `<p><strong>${escape(m.teacherName)} · ${escape(m.raw)}</strong><br>${escape(describe(m))}</p>`).join("")}</div>`
           : "");
+      if (result.plan.remainingIssues.length) {
+        $("preview-content").innerHTML += `<section class="preview-group"><h3>Lỗi còn lại sau kế hoạch</h3>${result.plan.remainingIssues.map(issue => `<p class="error-text">${escape(issue.message)}</p>`).join('')}</section>`;
+      }
       $("plan-summary").textContent = result.plan.moves.length
         ? `Sau khi áp dụng tất cả: còn ${result.plan.remaining} vi phạm.${data.warnings.length ? " Vẫn cần xem lại dữ liệu cảnh báo." : ""}`
         : "Chưa có phương án tự động khả thi.";
@@ -582,6 +588,8 @@ for (const name of DAY_NAMES) {
   option.textContent = shortDay(name);
   $("day-filter").appendChild(option);
 }
+$("class-session-limits").innerHTML = DAY_NAMES.map(name =>
+  `<tr><td>${escape(shortDay(name))}</td><td>${classSessionLimit(name, 'Sáng')}</td><td>${classSessionLimit(name, 'Chiều')}</td></tr>`).join('');
 try {
   if (sessionStorage.getItem("tkb-access") === "1") {
     $("login").hidden = true;

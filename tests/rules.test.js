@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { DAY_NAMES, parseClass, parseWorkbook } from '../parser.js';
-import { checkClassConflicts, checkTeacherDailyLimits, checkClassSessionLimits, runRules } from '../rules.js';
+import { DAY_NAMES, parseClass, parseWorkbook } from '../src/parser.js';
+import { checkClassConflicts, checkTeacherDailyLimits, checkClassSessionLimits, checkClassLessonGaps, runRules } from '../src/rules.js';
 
 function day(name, schedules) {
   return { name, rows: schedules.map((values, index) => ({
@@ -25,7 +25,7 @@ test('conflicts include all teachers and exact cells after activity normalizatio
 });
 
 test('distinct periods, sessions and days do not conflict; unknown classes are not guessed', () => {
-  const data = { days: [day('THỨ HAI', [['2B', '2B', '', '', '2B'], ['', '', 'II']]),
+  const data = { days: [day('THỨ HAI', [['2B', '', '', '', '2B'], ['', '', 'II']]),
     day('THỨ BA', [['2B']])] };
   assert.deepEqual(runRules(data), []);
 });
@@ -43,13 +43,26 @@ test('daily limits count occupied cells including unknowns and ignore cached tot
   }
 });
 
-test('morning limit is three occurrences and afternoon limit is two, across teachers', () => {
-  const valid = day('THỨ HAI', [['1A', '1A', '1A', '', '1A', '1A']]);
-  assert.deepEqual(checkClassSessionLimits(valid), []);
-  const invalid = day('THỨ HAI', [['1A', '1A', '1A', '', '1A', '1A'], ['CN 1A', '', '', '', 'ĐĐ1A']]);
-  const errors = checkClassSessionLimits(invalid);
-  assert.deepEqual(errors.map(e => [e.session, e.actual, e.limit]), [['Sáng', 4, 3], ['Chiều', 3, 2]]);
-  assert.equal(errors[0].lessons.length, 4);
+test('all five morning limits and all five afternoon limits count across teachers', () => {
+  for (const [index, limit] of [1, 3, 2, 3, 2].entries()) {
+    const morning = Array(4).fill(''); morning.fill('1A', 0, limit);
+    const valid = day(DAY_NAMES[index], [[...morning, '1A', '1A']]);
+    assert.deepEqual(checkClassSessionLimits(valid), []);
+    const invalid = day(DAY_NAMES[index], [[...morning, '1A', '1A'], ['CN 1A', '', '', '', 'ĐĐ1A']]);
+    const errors = checkClassSessionLimits(invalid);
+    assert.deepEqual(errors.map(e => [e.session, e.actual, e.limit]), [['Sáng', limit + 1, limit], ['Chiều', 3, 2]]);
+    assert.equal(errors[0].lessons.length, limit + 1);
+  }
+});
+
+test('two or three lessons must be consecutive per teacher and session, including empty gaps', () => {
+  for (const values of [['1A', '2A', '1A'], ['1A', '2A', '1A', '1A'], ['1A', '', '1A']]) {
+    const [issue] = checkClassLessonGaps(day('THỨ BA', [values]));
+    assert.equal(issue.className, '1A'); assert.equal(issue.actual, 1); assert.equal(issue.teacherName, 'GV 1');
+  }
+  for (const values of [['1A', '1A', '2A'], ['2A', '1A', '1A', '1A'], ['1A', '', '', '', '1A']])
+    assert.deepEqual(checkClassLessonGaps(day('THỨ BA', [values])), []);
+  assert.deepEqual(checkClassLessonGaps(day('THỨ BA', [['1A'], ['', '', '1A']])), []);
 });
 
 test('engine is pure, deterministic, extensible and emits distinct ids', () => {
@@ -68,12 +81,12 @@ test('unsupported days fail explicitly instead of silently passing daily limits'
   assert.throws(() => checkTeacherDailyLimits(day('THỨ BẢY', [[]])), /Chưa có giới hạn/);
 });
 
-test('provided workbook excludes assembly and produces only the class-session violation', { skip: !process.env.TKB_REFERENCE_JSON }, () => {
+test('independent reference uses the new morning limits and excludes assembly', { skip: !process.env.TKB_REFERENCE_JSON }, () => {
   const data = parseWorkbook(JSON.parse(readFileSync(process.env.TKB_REFERENCE_JSON, 'utf8')));
   const errors = runRules(data);
-  assert.deepEqual(errors.map(e => [e.rule, e.day, e.actual, e.limit]), [
-    ['CLASS_SESSION_LIMIT', 'THỨ NĂM', 3, 2],
-  ]);
-  assert.equal(errors[0].className, '2H');
-  assert.deepEqual(errors[0].lessons.map(l => l.cell), ['G32', 'H12', 'I9']);
+  assert.equal(errors.length, 15);
+  assert.ok(errors.every(e => e.rule === 'CLASS_SESSION_LIMIT'));
+  const afternoon = errors.find(e => e.day === 'THỨ NĂM' && e.session === 'Chiều');
+  assert.equal(afternoon.className, '2H');
+  assert.deepEqual(afternoon.lessons.map(l => l.cell), ['G32', 'H12', 'I9']);
 });

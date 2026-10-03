@@ -10,10 +10,10 @@
     />
     <title>Thời khóa biểu · Giáo viên chuyên</title>
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="assets/css/styles.css" />
     <script defer src="vendor/xlsx.full.min.js"></script>
     <script defer src="vendor/lucide.min.js"></script>
-    <script type="module" src="ui.js"></script>
+    <script type="module" src="src/ui.js"></script>
   </head>
   <body>
     <noscript
@@ -160,6 +160,7 @@
                 <option value="CLASS_CONFLICT">Trùng lớp</option>
                 <option value="TEACHER_DAILY_LIMIT">Vượt tiết giáo viên</option>
                 <option value="CLASS_SESSION_LIMIT">Vượt tiết lớp</option>
+                <option value="CLASS_LESSON_GAPS">Tiết cùng lớp không liền nhau</option>
               </select></label
             >
             <label
@@ -210,7 +211,7 @@
           <div id="history"></div>
         </section>
         <footer class="app-footer">
-          <span>Kiểm tra theo 3 quy tắc của nhà trường</span
+          <span>Kiểm tra theo 4 quy tắc của nhà trường</span
           ><button id="show-rules" class="text-button">
             Quy tắc kiểm tra <i data-lucide="info"></i>
           </button>
@@ -293,9 +294,14 @@
         </table>
         <h3>03. Giới hạn tiết lớp / buổi</h3>
         <p>
-          Buổi sáng tối đa 3 tiết. Buổi chiều tối đa 2 tiết. Đếm mọi lần xuất
-          hiện của lớp, kể cả tiết bị trùng.
+          Đếm tổng số tiết của một lớp trên tất cả giáo viên chuyên, kể cả tiết bị trùng.
         </p>
+        <table>
+          <thead><tr><th>Thứ</th><th>Sáng</th><th>Chiều</th></tr></thead>
+          <tbody id="class-session-limits"></tbody>
+        </table>
+        <h3>04. Tiết cùng lớp phải liền nhau</h3>
+        <p>Trong lịch của từng giáo viên, các tiết dạy cùng lớp trong một buổi phải liên tiếp, không xen lớp khác hoặc tiết trống. Ví dụ: 1A – 1A – 2A hợp lệ; 1A – 2A – 1A không hợp lệ. Không gộp tiết sáng với tiết chiều.</p>
         <p class="muted">
           Phạm vi kiểm tra là lịch giáo viên chuyên. Lịch giáo viên chủ nhiệm và
           các ràng buộc khác chưa được đối chiếu.

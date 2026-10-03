@@ -1,9 +1,10 @@
-import { copyFile, mkdir } from 'node:fs/promises';
+import { copyFile, mkdir, rm } from 'node:fs/promises';
+import { webFiles } from './web-files.mjs';
 
-const files = ['index.html', 'styles.css', 'ui.js', 'parser.js', 'rules.js', 'solver.js',
-  'solver-worker.js', 'exporter.js', 'config.js', 'assets/favicon.svg',
-  'vendor/xlsx.full.min.js', 'vendor/xlsx.LICENSE', 'vendor/fflate.js', 'vendor/fflate.LICENSE',
-  'vendor/lucide.min.js', 'vendor/lucide.LICENSE'];
+const files = webFiles;
+// Only remove this generated directory, so obsolete root modules are not deployed.
+const output = new URL('../dist/', import.meta.url);
+await rm(output, { recursive: true, force: true });
 for (const file of files) {
   const target = new URL(`../dist/${file}`, import.meta.url);
   await mkdir(new URL('.', target), { recursive: true });
